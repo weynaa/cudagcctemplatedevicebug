@@ -1,37 +1,47 @@
 Using non-type template parameters in a `__device__` template-variable causes a parsing error with some functions:
 ```cpp
-#include <iostream>
-#include <cstdint>
 #include <cuda.h>
-
-//mixed types work
-__global__
-void addTest( const int* bcdasdk, int* c){
-
+#include <cuda_runtime.h>
+#include <cstdint>
+#include <cstdio>
+#include <cuda_device_runtime_api.h>
+// mixed types work
+__global__ void addTest(const int* bcdasdk, int* c) {
+  printf("hello from addTest()\n");
 }
 
-//twice the same argument-type in a function does not work
-__global__
-void addTest2( void* a,void*b){
+// twice the same type in a parameter does not work
+__global__ void addTest2(void* a, void* b) {
+  printf("hello from addTest2()\n");
+}
 
+template<typename... Args>
+__global__ void execFnPtr(void(*f)(Args...)){
+    (*f)<<<1,1>>>(nullptr,nullptr);
 }
 
 
 template <typename F, F f>
-__device__ constexpr F deviceSymbol = f;
+__device__ F deviceSymbol = f;
 
 int main() {
+  void (*kernelFuncPtr)(const int*, int*);
+  auto err = cudaMemcpyFromSymbol(&kernelFuncPtr,
+                       deviceSymbol<decltype(&addTest), &addTest>,
+                       sizeof(void*));
+  printf("this pointer on the device is: %p\n", kernelFuncPtr);
+  execFnPtr<<<1, 1>>>(kernelFuncPtr);
 
-    void* kernelFuncPtr;
-    cudaMemcpyFromSymbol(&kernelFuncPtr,&deviceSymbol<decltype(&addTest),&addTest>,sizeof(void*));
-    printf("this pointer on the device is: %p",kernelFuncPtr);
+  // This code does not compile on GCC7/CUDA10, comment it out and it should work
+  void (*kernelFuncPtr2)(void*, void*);
+  err = cudaMemcpyFromSymbol(&kernelFuncPtr2,
+                       deviceSymbol<decltype(&addTest2), &addTest2>,
+                       sizeof(void*));
+  printf("this pointer will cause a compile-error: %p\n", kernelFuncPtr2);
 
-    //This code does not compile on GCC7/CUDA10, comment it out and it should work
-    void* kernelFuncPtr2;
-    cudaMemcpyFromSymbol(&kernelFuncPtr2,&deviceSymbol<decltype(&addTest2),&addTest2>,sizeof(void*));
-    printf("this pointer will cause a compile-error: %p",kernelFuncPtr2);
+  execFnPtr<<<1, 1>>>(kernelFuncPtr2);
 
-    return 0;
+  return 0;
 }
 ```
 On GCC 7.5 with CUDA10 this will cause a parsing error:
